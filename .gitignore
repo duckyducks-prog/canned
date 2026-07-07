@@ -1,0 +1,3 @@
+
+# Blender source files are too big for GitHub — keep them local
+*.blend
