@@ -1,20 +1,32 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { NOTES, FOOD_LINES, TOOL_LINES } from './story.js';
 
-// The 7 can types matching the user's Blender models. `size` in meters.
-// When real glTF cans land in assets/, these placeholders are replaced by
-// name-matching (can_<type>_NN) — the contents system stays identical.
-export const CAN_TYPES = {
-  tomato:    { label: '#c0392b', body: '#e8e2d0', size: [0.038, 0.095] },
-  chicken:   { label: '#e07020', body: '#efe8d5', size: [0.040, 0.115] },
-  corn:      { label: '#e6b820', body: '#efe4c0', size: [0.040, 0.100] },
-  peaches:   { label: '#e8a83a', body: '#f2e6c8', size: [0.042, 0.105] },
-  beans:     { label: '#b03a2e', body: '#e8dfc8', size: [0.040, 0.098] },
-  meatballs: { label: '#c02020', body: '#f0ead8', size: [0.055, 0.140] },
-  tuna:      { label: '#3aa0b8', body: '#e8e2d0', size: [0.048, 0.055] },
-};
+// Real optimized can model (blank/unlabeled Meshy export). One model, cloned
+// for every can for now — labeled variants can map type -> different .glb later.
+const CAN_MODEL_URL = './assets/can.glb';
+const CAN_SCALE = 0.055;          // Meshy units (2.0 tall) -> ~0.11 m tall
+const CAN_HEIGHT = 2.0 * CAN_SCALE;
+const CAN_RADIUS = 0.72 * CAN_SCALE;
 
-const METAL = new THREE.MeshStandardMaterial({ color: '#b8bcc0', metalness: 0.85, roughness: 0.35 });
+// Internal types still drive contents placement (hints/fragments). Visually
+// identical for now since we use one blank model.
+export const CAN_TYPES = {
+  tomato: {}, chicken: {}, corn: {}, peaches: {}, beans: {}, meatballs: {}, tuna: {},
+};
+const SLOP_COLOR = '#8a5a3a';
+
+let cachedModel = null;
+
+export async function loadCanModel() {
+  if (cachedModel) return cachedModel;
+  const draco = new DRACOLoader().setDecoderPath('./vendor/draco/');
+  const loader = new GLTFLoader().setDRACOLoader(draco);
+  const gltf = await loader.loadAsync(CAN_MODEL_URL);
+  cachedModel = gltf.scene;
+  return cachedModel;
+}
 
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -24,46 +36,32 @@ function shuffle(arr) {
   return arr;
 }
 
-// Build one placeholder can: body cylinder + label band + separate lid child.
-export function buildPlaceholderCan(type, index) {
-  const def = CAN_TYPES[type];
-  const [r, h] = def.size;
+// Build one can: cloned real model + a procedural lid cap the player peels open.
+export function buildCan(type, index) {
   const group = new THREE.Group();
   group.name = `can_${type}_${String(index).padStart(2, '0')}`;
 
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 20), METAL);
-  body.name = 'body';
-  group.add(body);
+  const model = cachedModel.clone(true);
+  model.scale.setScalar(CAN_SCALE);
+  model.name = 'body';
+  group.add(model);
 
-  const label = new THREE.Mesh(
-    new THREE.CylinderGeometry(r * 1.005, r * 1.005, h * 0.62, 20, 1, true),
-    new THREE.MeshStandardMaterial({ color: def.label, roughness: 0.8 })
-  );
-  label.name = 'label';
-  group.add(label);
-
-  const band = new THREE.Mesh(
-    new THREE.CylinderGeometry(r * 1.006, r * 1.006, h * 0.22, 20, 1, true),
-    new THREE.MeshStandardMaterial({ color: def.body, roughness: 0.85 })
-  );
-  band.position.y = h * 0.1;
-  group.add(band);
-
+  // A thin metal lid sitting on top — the mash mechanic dents/removes THIS.
   const lid = new THREE.Mesh(
-    new THREE.CylinderGeometry(r * 0.96, r * 0.96, h * 0.03, 20),
+    new THREE.CylinderGeometry(CAN_RADIUS * 0.92, CAN_RADIUS * 0.92, CAN_HEIGHT * 0.035, 20),
     new THREE.MeshStandardMaterial({ color: '#c8ccd0', metalness: 0.9, roughness: 0.25 })
   );
   lid.name = `can_${type}_${String(index).padStart(2, '0')}_lid`;
-  lid.position.y = h / 2;
+  lid.position.y = CAN_HEIGHT * 0.98;
   group.add(lid);
 
-  group.userData.canRadius = r;
-  group.userData.canHeight = h;
+  group.userData.canRadius = CAN_RADIUS;
+  group.userData.canHeight = CAN_HEIGHT;
+  group.userData.slopColor = SLOP_COLOR;
   return group;
 }
 
-// Assign contents to a set of spawned cans, honoring story placement rules:
-// the spoon hides in a tuna can, the second code fragment in a peaches can.
+// Assign contents to spawned cans, honoring story placement rules.
 export function assignContents(cans) {
   const byType = (t) => cans.filter((c) => c.userData.type === t);
   const unassigned = new Set(cans);
@@ -78,29 +76,22 @@ export function assignContents(cans) {
     return take(pool[Math.floor(Math.random() * pool.length)]);
   };
 
-  // Tools — spoon honors the tuna hint; rock anywhere.
   const spoonCan = takeRandomOfType('tuna') || takeRandom();
   spoonCan.userData.contents = { kind: 'tool', tool: 'spoon', line: TOOL_LINES.spoon };
   const rockCan = takeRandom();
   rockCan.userData.contents = { kind: 'tool', tool: 'rock', line: TOOL_LINES.rock };
 
-  // Notes — fragment 2 mentions fruit, so it lives in peaches.
   const fragments = NOTES.filter((n) => n.kind === 'fragment');
   const others = shuffle(NOTES.filter((n) => n.kind !== 'fragment'));
   if (fragments[1]) {
     const c = takeRandomOfType('peaches') || takeRandom();
     c.userData.contents = { kind: 'note', note: fragments[1] };
   }
-  if (fragments[0]) {
-    const c = takeRandom();
-    c.userData.contents = { kind: 'note', note: fragments[0] };
-  }
+  if (fragments[0]) takeRandom().userData.contents = { kind: 'note', note: fragments[0] };
   for (const note of others) {
     if (!unassigned.size) break;
     takeRandom().userData.contents = { kind: 'note', note };
   }
-
-  // Everything else: food.
   for (const can of unassigned) {
     can.userData.contents = { kind: 'food', line: FOOD_LINES[can.userData.type] };
   }

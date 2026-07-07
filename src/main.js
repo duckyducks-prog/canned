@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { CAN_TYPES, buildPlaceholderCan, assignContents } from './cans.js';
+import { CAN_TYPES, buildCan, loadCanModel, assignContents } from './cans.js';
 import * as ui from './ui.js';
 import * as audio from './audio.js';
 
@@ -170,10 +170,9 @@ function buildPlaceholderRoom() {
   const forced = ['tuna', 'peaches'];
   spots.forEach((spot, i) => {
     const type = forced[i] || typeNames[Math.floor(Math.random() * typeNames.length)];
-    const can = buildPlaceholderCan(type, i);
+    const can = buildCan(type, i);
     can.userData.type = type;
-    can.position.copy(spot.local);
-    can.position.y += can.userData.canHeight / 2;
+    can.position.copy(spot.local); // model base sits at group origin -> on the shelf
     can.rotation.y = Math.random() * Math.PI * 2;
     spot.unit.add(can);
     canRegistry.push(can);
@@ -184,17 +183,14 @@ function buildPlaceholderRoom() {
   refreshStatus();
 }
 
-// Try the real Blender export first; fall back to placeholder geometry.
-new GLTFLoader().load(
-  './assets/bunker.glb',
-  (gltf) => {
-    scene.add(gltf.scene);
-    // TODO when real assets land: harvest can_* / keypad / hatch by name here.
-    buildPlaceholderRoom(); // keep gameplay objects until the export includes them
-  },
-  undefined,
-  () => buildPlaceholderRoom()
-);
+// Load the real can model, then build the room (placeholder room geometry +
+// real cloned cans). When a bunker.glb lands, harvest it here by name instead.
+loadCanModel()
+  .then(() => buildPlaceholderRoom())
+  .catch((err) => {
+    console.error('Can model failed to load:', err);
+    buildPlaceholderRoom(); // room still works; cans just won't appear
+  });
 
 // --- Controls ----------------------------------------------------------------
 const controls = new PointerLockControls(camera, renderer.domElement);
@@ -289,10 +285,10 @@ function openHeldCan() {
     // low-poly slop
     const slop = new THREE.Mesh(
       new THREE.SphereGeometry(can.userData.canRadius * 0.8, 8, 6),
-      new THREE.MeshStandardMaterial({ color: CAN_TYPES[can.userData.type].label, roughness: 0.4 })
+      new THREE.MeshStandardMaterial({ color: can.userData.slopColor, roughness: 0.4 })
     );
     slop.scale.y = 0.35;
-    slop.position.y = can.userData.canHeight * 0.38;
+    slop.position.y = can.userData.canHeight * 0.9;
     can.add(slop);
     ui.setPrompt(contents.line + '\n\nE — put it back');
   } else if (contents.kind === 'tool') {
