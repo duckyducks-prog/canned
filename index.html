@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CANNED</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* HUD */
+  #crosshair {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,255,255,0.75); pointer-events: none; z-index: 10;
+    box-shadow: 0 0 4px rgba(0,0,0,0.8);
+  }
+  #prompt {
+    position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%);
+    color: #e8e2d0; font-size: 17px; letter-spacing: 1px; text-align: center;
+    text-shadow: 0 1px 3px #000, 0 0 12px rgba(0,0,0,0.9);
+    pointer-events: none; z-index: 10; white-space: pre-line;
+  }
+  #status {
+    position: fixed; left: 16px; bottom: 14px; color: #9a937e; font-size: 13px;
+    letter-spacing: 1px; text-shadow: 0 1px 2px #000; z-index: 10; pointer-events: none;
+    line-height: 1.7;
+  }
+  #vignette {
+    position: fixed; inset: 0; pointer-events: none; z-index: 5;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+  }
+
+  /* Start / pause screen */
+  #overlay {
+    position: fixed; inset: 0; z-index: 30; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; background: rgba(0,0,0,0.88);
+    color: #d8d2c0; cursor: pointer; text-align: center;
+  }
+  #overlay h1 { font-size: 44px; letter-spacing: 12px; margin: 0 0 6px; color: #e8e2d0; }
+  #overlay .sub { color: #8a8370; font-size: 14px; letter-spacing: 3px; margin-bottom: 34px; }
+  #overlay .controls { font-size: 14px; color: #a49d8a; line-height: 2; }
+  #overlay .click { margin-top: 34px; font-size: 15px; color: #e8e2d0; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: 0.35; } }
+
+  /* Note reading */
+  #note {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-1.5deg);
+    width: min(420px, 80vw); min-height: 220px; padding: 34px 38px; z-index: 40;
+    background: linear-gradient(175deg, #d8cfae 0%, #cfc49e 60%, #c2b48c 100%);
+    color: #3a3122; font-size: 17px; line-height: 1.8; display: none;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.85);
+    white-space: pre-wrap; font-family: 'Courier New', monospace;
+  }
+  #note .hint { position: absolute; bottom: 10px; right: 16px; font-size: 11px; color: #6b5f45; }
+  #note.damaged { background: linear-gradient(175deg, #c2b287 0%, #a8985f 55%, #8f7f4c 100%); }
+  #note .stain { position: absolute; border-radius: 50%; background: radial-gradient(circle, rgba(140,40,20,0.35), transparent 70%); pointer-events: none; }
+
+  /* Keypad */
+  #keypad {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 40; background: #1b1d1a; border: 3px solid #3a3d38; border-radius: 8px;
+    padding: 22px; display: none; box-shadow: 0 18px 60px rgba(0,0,0,0.9);
+  }
+  #keypad .screen {
+    background: #0d1f0d; color: #7dff7d; font-size: 26px; letter-spacing: 10px;
+    text-align: center; padding: 10px 6px; margin-bottom: 16px; border-radius: 4px;
+    min-height: 34px; font-family: 'Courier New', monospace;
+    text-shadow: 0 0 8px rgba(125,255,125,0.6);
+  }
+  #keypad .grid { display: grid; grid-template-columns: repeat(3, 64px); gap: 10px; }
+  #keypad button {
+    height: 52px; font-size: 20px; background: #2c2f2a; color: #cfc9b8;
+    border: 1px solid #46493f; border-radius: 6px; cursor: pointer; font-family: inherit;
+  }
+  #keypad button:hover { background: #3a3d36; }
+  #keypad button:active { transform: translateY(1px); }
+  #keypad .hint { text-align: center; color: #6f6a5a; font-size: 11px; margin-top: 12px; }
+
+  /* Round transition */
+  #roundcard {
+    position: fixed; inset: 0; z-index: 50; display: none; flex-direction: column;
+    align-items: center; justify-content: center; background: #000; color: #d8d2c0;
+    text-align: center;
+  }
+  #roundcard h2 { font-size: 34px; letter-spacing: 10px; margin: 0 0 14px; }
+  #roundcard p { color: #8a8370; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="vignette"></div>
+  <div id="crosshair" style="display:none"></div>
+  <div id="prompt"></div>
+  <div id="status"></div>
+
+  <div id="overlay">
+    <h1>CANNED</h1>
+    <div class="sub">ROUND 1 — THE PANTRY</div>
+    <div class="controls">
+      WASD — move &nbsp;·&nbsp; MOUSE — look<br>
+      CLICK — pick up / strike a can<br>
+      E — put a can back &nbsp;·&nbsp; ESC — release mouse
+    </div>
+    <div class="click">CLICK TO WAKE UP</div>
+  </div>
+
+  <div id="note"><span id="notetext"></span><span class="hint">click to put down</span></div>
+
+  <div id="keypad">
+    <div class="screen" id="kscreen">____</div>
+    <div class="grid" id="kgrid"></div>
+    <div class="hint">ESC to step away</div>
+  </div>
+
+  <div id="roundcard">
+    <h2>ROUND 2</h2>
+    <p>COMING SOON</p>
+    <p style="margin-top:30px; font-size:12px;">the hatch goes deeper than it should</p>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three.module.js",
+      "three/addons/loaders/GLTFLoader.js": "./vendor/loaders/GLTFLoader.js",
+      "three/addons/controls/PointerLockControls.js": "./vendor/controls/PointerLockControls.js"
+    }
+  }
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
